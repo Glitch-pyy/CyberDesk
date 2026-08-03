@@ -25,6 +25,24 @@ Current development hardware:
 - Two onboard buttons
 - USB-C connection
 
+## Current Features
+
+- LILYGO T-Display-S3 support
+- Wi-Fi connection with automatic reconnection
+- NTP network time synchronization
+- Real-time clock and date display
+- Local IP address display
+- Wi-Fi RSSI signal strength display
+- Partial screen refresh to reduce flicker
+- Local credential configuration excluded from Git
+
+## Firmware Setup
+
+1. Copy the example credential file:
+
+```bash
+cp firmware/include/secrets.example.h firmware/include/secrets.h
+
 ## Project Structure
 
 ```text

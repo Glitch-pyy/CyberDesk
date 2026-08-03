@@ -88,3 +88,6 @@ firmware/.pio/
 
 # Environment files
 .env
+
+# Local Wi-Fi credentials
+firmware/include/secrets.h
