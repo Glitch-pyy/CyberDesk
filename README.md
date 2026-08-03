@@ -42,6 +42,7 @@ Current development hardware:
 
 ```bash
 cp firmware/include/secrets.example.h firmware/include/secrets.h
+```
 
 ## Project Structure
 
@@ -53,3 +54,4 @@ CyberDesk/
 ├── hardware/      # Schematics, wiring and future PCB files
 ├── images/        # Project images and screenshots
 └── web/           # Web configuration interface
+```

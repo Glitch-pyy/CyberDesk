@@ -4,6 +4,7 @@
 #include <time.h>
 
 #include "secrets.h"
+#include "time_sync_retry.h"
 
 namespace Pins {
 constexpr uint8_t POWER_ON = 15;
@@ -30,6 +31,7 @@ constexpr const char* NTP_SERVER_1 = "pool.ntp.org";
 constexpr const char* NTP_SERVER_2 = "time.google.com";
 
 constexpr uint32_t SYNC_TIMEOUT_MS = 15000;
+constexpr uint32_t SYNC_RETRY_INTERVAL_MS = 60000;
 constexpr uint32_t SCREEN_UPDATE_INTERVAL_MS = 1000;
 }  // namespace TimeConfig
 
@@ -81,6 +83,7 @@ Arduino_GFX* display = new Arduino_ST7789(
 );
 
 uint32_t lastReconnectAttempt = 0;
+uint32_t lastTimeSyncAttempt = 0;
 uint32_t lastScreenUpdate = 0;
 uint32_t lastWiFiStatusUpdate = 0;
 
@@ -288,6 +291,8 @@ void updateClockScreen() {
 }
 
 bool synchronizeTime() {
+    lastTimeSyncAttempt = millis();
+
     Serial.println();
     Serial.println("Synchronizing network time...");
 
@@ -337,8 +342,6 @@ bool synchronizeTime() {
 
     return true;
 }
-
-
 void drawConnectionFailedScreen() {
     display->fillScreen(BLACK);
 
@@ -401,6 +404,7 @@ void setup() {
 
     pinMode(Pins::BUTTON_1, INPUT_PULLUP);
     pinMode(Pins::BUTTON_2, INPUT_PULLUP);
+    // Button navigation will be restored as part of Phase 3.
 
     display->begin();
 
@@ -438,7 +442,14 @@ void loop() {
         return;
     }
 
-    if (!timeSynchronized) {
+    if (
+        !timeSynchronized &&
+        isTimeSyncRetryDue(
+            currentTime,
+            lastTimeSyncAttempt,
+            TimeConfig::SYNC_RETRY_INTERVAL_MS
+        )
+    ) {
         timeSynchronized = synchronizeTime();
     }
 
