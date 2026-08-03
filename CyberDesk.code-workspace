@@ -2,11 +2,7 @@
 	"folders": [
 		{
 			"path": "."
-		},
-		{
-			"name": "cyberdesk-firmware",
-			"path": "../../PlatformIO/Projects/cyberdesk-firmware"
-		}
+		},	
 	],
 	"settings": {}
 }
