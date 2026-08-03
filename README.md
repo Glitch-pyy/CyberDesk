@@ -1,6 +1,8 @@
 # CyberDesk
 
-CyberDesk is an open-source modular desktop hardware system based on ESP32.
+CyberDesk is an open-source modular desktop hardware system based on the ESP32-S3.
+
+The project is currently built around the LILYGO T-Display-S3 development board.
 
 ## Goals
 
@@ -8,16 +10,28 @@ CyberDesk is an open-source modular desktop hardware system based on ESP32.
 - Custom Stream Deck
 - Plugin-based hardware modules
 - Web configuration panel
-- OTA firmware update
-- Future PCB and 3D-printed case
+- OTA firmware updates
+- Future custom PCB and 3D-printed enclosure
+
+## Hardware
+
+Current development hardware:
+
+- LILYGO T-Display-S3
+- ESP32-S3R8
+- 16 MB Flash
+- 8 MB OPI PSRAM
+- 1.9-inch 170 × 320 IPS display
+- Two onboard buttons
+- USB-C connection
 
 ## Project Structure
 
 ```text
 CyberDesk/
-├── docs/
-├── firmware/
-├── desktop/
-├── web/
-├── hardware/
-└── images/
+├── desktop/       # Desktop-side application
+├── docs/          # Project documentation
+├── firmware/      # ESP32-S3 PlatformIO firmware
+├── hardware/      # Schematics, wiring and future PCB files
+├── images/        # Project images and screenshots
+└── web/           # Web configuration interface
