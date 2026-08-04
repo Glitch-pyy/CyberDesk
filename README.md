@@ -34,7 +34,26 @@ Current development hardware:
 - Local IP address display
 - Wi-Fi RSSI signal strength display
 - Partial screen refresh to reduce flicker
+- Dual-button navigation with software debouncing
+- Multi-page user interface
+- Clock dashboard page
+- System status page with dynamic uptime and network data
+- Device information page
+- Circular previous/next page navigation
 - Local credential configuration excluded from Git
+
+## Controls
+
+The two onboard buttons are used for page navigation:
+
+- Button 1 (GPIO 0): Previous page
+- Button 2 (GPIO 14): Next page
+
+Available pages:
+
+1. Clock
+2. System Status
+3. Device Information
 
 ## Firmware Setup
 
@@ -55,3 +74,11 @@ CyberDesk/
 ├── images/        # Project images and screenshots
 └── web/           # Web configuration interface
 ```
+
+## Development Status
+
+- Phase 0: Project initialization — Complete
+- Phase 1: Hardware bring-up — Complete
+- Phase 2: Network clock dashboard — Complete
+- Phase 3: Multi-page UI and button navigation — Complete
+- Phase 4: Desktop communication — Planned

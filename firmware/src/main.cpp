@@ -23,6 +23,10 @@ constexpr uint32_t CONNECTION_TIMEOUT_MS = 15000;
 constexpr uint32_t RETRY_INTERVAL_MS = 10000;
 }  // namespace NetworkConfig
 
+namespace ButtonConfig {
+constexpr uint32_t DEBOUNCE_DELAY_MS = 40;
+}
+
 namespace TimeConfig {
 constexpr long GMT_OFFSET_SECONDS = 8 * 3600;
 constexpr int DAYLIGHT_OFFSET_SECONDS = 0;
@@ -37,6 +41,7 @@ constexpr uint32_t SCREEN_UPDATE_INTERVAL_MS = 1000;
 
 namespace UiConfig {
 constexpr uint32_t WIFI_STATUS_UPDATE_INTERVAL_MS = 5000;
+constexpr uint32_t SYSTEM_UPDATE_INTERVAL_MS = 1000;
 
 constexpr int16_t TIME_X = 50;
 constexpr int16_t TIME_Y = 48;
@@ -53,6 +58,13 @@ constexpr int16_t WIFI_Y = 12;
 constexpr int16_t WIFI_WIDTH = 110;
 constexpr int16_t WIFI_HEIGHT = 12;
 }  // namespace UiConfig
+
+enum class ScreenPage : uint8_t {
+    CLOCK = 0,
+    SYSTEM,
+    INFO,
+    COUNT
+};
 
 Arduino_DataBus* bus = new Arduino_ESP32PAR8Q(
     7,   // DC
@@ -86,9 +98,20 @@ uint32_t lastReconnectAttempt = 0;
 uint32_t lastTimeSyncAttempt = 0;
 uint32_t lastScreenUpdate = 0;
 uint32_t lastWiFiStatusUpdate = 0;
+uint32_t lastSystemUpdate = 0;
+
+bool button1LastReading = HIGH;
+bool button1StableState = HIGH;
+uint32_t button1LastChangeTime = 0;
+
+bool button2LastReading = HIGH;
+bool button2StableState = HIGH;
+uint32_t button2LastChangeTime = 0;
 
 bool timeSynchronized = false;
 bool clockScreenInitialized = false;
+ScreenPage currentPage = ScreenPage::CLOCK;
+bool pageNeedsRedraw = true;
 
 char lastDisplayedDate[16] = "";
 
@@ -167,6 +190,11 @@ void drawClockLayout() {
     display->setTextColor(WHITE);
     display->setCursor(30, 151);
     display->print(WiFi.localIP());
+
+    display->setTextColor(DARKGREY);
+    display->setTextSize(1);
+    display->setCursor(235, 151);
+    display->print("<  PAGE  >");
 
     clockScreenInitialized = true;
 }
@@ -290,6 +318,238 @@ void updateClockScreen() {
     updateDateArea(timeInfo);
 }
 
+void drawSystemLayout() {
+    display->fillScreen(BLACK);
+
+    display->setTextColor(CYAN);
+    display->setTextSize(2);
+    display->setCursor(12, 12);
+    display->print("SYSTEM");
+
+    display->drawFastHLine(
+        10,
+        36,
+        DisplayConfig::WIDTH - 20,
+        DARKGREY
+    );
+
+    display->setTextSize(1);
+    display->setTextColor(DARKGREY);
+
+    display->setCursor(20, 55);
+    display->print("Wi-Fi");
+
+    display->setCursor(20, 80);
+    display->print("IP");
+
+    display->setCursor(20, 105);
+    display->print("Signal");
+
+    display->setCursor(20, 130);
+    display->print("Uptime");
+
+    display->setCursor(12, 155);
+    display->print("< Previous       Next >");
+}
+
+void updateSystemData() {
+    // 清除右侧动态数据显示区域
+    display->fillRect(
+        105,
+        45,
+        210,
+        100,
+        BLACK
+    );
+
+    display->setTextSize(1);
+
+    // Wi-Fi status
+    display->setCursor(110, 55);
+
+    if (WiFi.status() == WL_CONNECTED) {
+        display->setTextColor(GREEN);
+        display->print("Connected");
+    } else {
+        display->setTextColor(RED);
+        display->print("Offline");
+    }
+
+    // IP address
+    display->setTextColor(WHITE);
+    display->setCursor(110, 80);
+
+    if (WiFi.status() == WL_CONNECTED) {
+        display->print(WiFi.localIP());
+    } else {
+        display->print("---.---.---.---");
+    }
+
+    // Signal strength
+    display->setCursor(110, 105);
+
+    if (WiFi.status() == WL_CONNECTED) {
+        const int32_t rssi = WiFi.RSSI();
+
+        if (rssi < -75) {
+            display->setTextColor(RED);
+        } else if (rssi < -60) {
+            display->setTextColor(YELLOW);
+        } else {
+            display->setTextColor(GREEN);
+        }
+
+        display->print(rssi);
+        display->print(" dBm");
+    } else {
+        display->setTextColor(RED);
+        display->print("Unavailable");
+    }
+
+    // Uptime
+    display->setTextColor(WHITE);
+    display->setCursor(110, 130);
+
+    const uint32_t uptimeSeconds = millis() / 1000;
+    const uint32_t hours = uptimeSeconds / 3600;
+    const uint32_t minutes = (uptimeSeconds % 3600) / 60;
+    const uint32_t seconds = uptimeSeconds % 60;
+
+    char uptimeText[16];
+
+    snprintf(
+        uptimeText,
+        sizeof(uptimeText),
+        "%02lu:%02lu:%02lu",
+        static_cast<unsigned long>(hours),
+        static_cast<unsigned long>(minutes),
+        static_cast<unsigned long>(seconds)
+    );
+
+    display->print(uptimeText);
+}
+
+void drawInfoScreen() {
+    display->fillScreen(BLACK);
+
+    display->setTextColor(CYAN);
+    display->setTextSize(2);
+    display->setCursor(12, 12);
+    display->print("DEVICE INFO");
+
+    display->drawFastHLine(
+        10,
+        36,
+        DisplayConfig::WIDTH - 20,
+        DARKGREY
+    );
+
+    display->setTextSize(1);
+
+    display->setTextColor(DARKGREY);
+    display->setCursor(20, 55);
+    display->print("Project");
+
+    display->setTextColor(WHITE);
+    display->setCursor(110, 55);
+    display->print("CyberDesk");
+
+    display->setTextColor(DARKGREY);
+    display->setCursor(20, 80);
+    display->print("Board");
+
+    display->setTextColor(WHITE);
+    display->setCursor(110, 80);
+    display->print("T-Display-S3");
+
+    display->setTextColor(DARKGREY);
+    display->setCursor(20, 105);
+    display->print("Chip");
+
+    display->setTextColor(WHITE);
+    display->setCursor(110, 105);
+    display->print("ESP32-S3");
+
+    display->setTextColor(DARKGREY);
+    display->setCursor(20, 130);
+    display->print("Firmware");
+
+    display->setTextColor(GREEN);
+    display->setCursor(110, 130);
+    display->print("Phase 3");
+
+    display->setTextColor(DARKGREY);
+    display->setCursor(12, 155);
+    display->print("< Previous       Next >");
+}
+
+void drawCurrentPage() {
+    switch (currentPage) {
+        case ScreenPage::CLOCK:
+            clockScreenInitialized = false;
+            lastDisplayedDate[0] = '\0';
+
+            updateClockScreen();
+            updateWiFiStatusArea();
+
+            Serial.println("Page: CLOCK");
+            break;
+
+        case ScreenPage::SYSTEM:
+            drawSystemLayout();
+            updateSystemData();
+
+            lastSystemUpdate = millis();
+
+            Serial.println("Page: SYSTEM");
+            break;
+
+        case ScreenPage::INFO:
+            drawInfoScreen();
+
+            Serial.println("Page: INFO");
+            break;
+
+        case ScreenPage::COUNT:
+            currentPage = ScreenPage::CLOCK;
+            pageNeedsRedraw = true;
+            return;
+    }
+
+    pageNeedsRedraw = false;
+}
+
+void goToNextPage() {
+    const uint8_t pageCount =
+        static_cast<uint8_t>(ScreenPage::COUNT);
+
+    uint8_t pageIndex =
+        static_cast<uint8_t>(currentPage);
+
+    pageIndex = (pageIndex + 1) % pageCount;
+
+    currentPage =
+        static_cast<ScreenPage>(pageIndex);
+
+    pageNeedsRedraw = true;
+}
+
+void goToPreviousPage() {
+    const uint8_t pageCount =
+        static_cast<uint8_t>(ScreenPage::COUNT);
+
+    uint8_t pageIndex =
+        static_cast<uint8_t>(currentPage);
+
+    pageIndex =
+        (pageIndex + pageCount - 1) % pageCount;
+
+    currentPage =
+        static_cast<ScreenPage>(pageIndex);
+
+    pageNeedsRedraw = true;
+}
+
 bool synchronizeTime() {
     lastTimeSyncAttempt = millis();
 
@@ -392,6 +652,37 @@ bool connectToWiFi() {
     return false;
 }
 
+bool wasButtonPressed(
+    uint8_t pin,
+    bool& lastReading,
+    bool& stableState,
+    uint32_t& lastChangeTime
+) {
+    const bool currentReading = digitalRead(pin);
+    const uint32_t currentTime = millis();
+
+    if (currentReading != lastReading) {
+        lastReading = currentReading;
+        lastChangeTime = currentTime;
+    }
+
+    if (
+        currentTime - lastChangeTime >=
+        ButtonConfig::DEBOUNCE_DELAY_MS
+    ) {
+        if (currentReading != stableState) {
+            stableState = currentReading;
+
+            // INPUT_PULLUP means LOW represents a pressed button.
+            if (stableState == LOW) {
+                return true;
+            }
+        }
+    }
+
+    return false;
+}
+
 void setup() {
     Serial.begin(115200);
     delay(1000);
@@ -404,7 +695,6 @@ void setup() {
 
     pinMode(Pins::BUTTON_1, INPUT_PULLUP);
     pinMode(Pins::BUTTON_2, INPUT_PULLUP);
-    // Button navigation will be restored as part of Phase 3.
 
     display->begin();
 
@@ -416,6 +706,38 @@ void setup() {
 
 void loop() {
     const uint32_t currentTime = millis();
+
+    // Button 1: previous page
+    if (
+        wasButtonPressed(
+            Pins::BUTTON_1,
+            button1LastReading,
+            button1StableState,
+            button1LastChangeTime
+        )
+    ) {
+        Serial.println("Button 1: previous page");
+        goToPreviousPage();
+    }
+
+    // Button 2: next page
+    if (
+        wasButtonPressed(
+            Pins::BUTTON_2,
+            button2LastReading,
+            button2StableState,
+            button2LastChangeTime
+        )
+    ) {
+        Serial.println("Button 2: next page");
+        goToNextPage();
+    }
+    
+    // Redraw after page navigation
+    if (pageNeedsRedraw) {
+        drawCurrentPage();
+    }
+
 
     if (WiFi.status() != WL_CONNECTED) {
         timeSynchronized = false;
@@ -454,6 +776,7 @@ void loop() {
     }
 
     if (
+        currentPage == ScreenPage::CLOCK &&
         timeSynchronized &&
         currentTime - lastScreenUpdate >=
             TimeConfig::SCREEN_UPDATE_INTERVAL_MS
@@ -463,12 +786,32 @@ void loop() {
     }
 
     if (
-        currentTime - lastWiFiStatusUpdate >=
-            UiConfig::WIFI_STATUS_UPDATE_INTERVAL_MS
-    ) {
-        lastWiFiStatusUpdate = currentTime;
-        updateWiFiStatusArea();
-    }
+    currentPage == ScreenPage::CLOCK &&
+    timeSynchronized &&
+    currentTime - lastScreenUpdate >=
+        TimeConfig::SCREEN_UPDATE_INTERVAL_MS
+) {
+    lastScreenUpdate = currentTime;
+    updateClockScreen();
+}
+
+if (
+    currentPage == ScreenPage::SYSTEM &&
+    currentTime - lastSystemUpdate >=
+        UiConfig::SYSTEM_UPDATE_INTERVAL_MS
+) {
+    lastSystemUpdate = currentTime;
+    updateSystemData();
+}
+
+if (
+    currentPage == ScreenPage::CLOCK &&
+    currentTime - lastWiFiStatusUpdate >=
+        UiConfig::WIFI_STATUS_UPDATE_INTERVAL_MS
+) {
+    lastWiFiStatusUpdate = currentTime;
+    updateWiFiStatusArea();
+}
 
     delay(20);
 }
