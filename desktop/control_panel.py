@@ -26,7 +26,8 @@ WINDOW_WIDTH = 760
 WINDOW_HEIGHT = 620
 
 METRICS_UPDATE_INTERVAL_SECONDS = 2.0
-
+CONNECTION_CHECK_INTERVAL_MS = 3000
+RECONNECT_INTERVAL_MS = 3000
 
 class CyberDeskControlPanel:
     def __init__(self, root: tk.Tk) -> None:
@@ -48,6 +49,9 @@ class CyberDeskControlPanel:
 
         self.metrics_stop_event = threading.Event()
         self.serial_lock = threading.Lock()
+        self.manual_disconnect = False
+        self.connection_check_running = False
+        self.reconnect_scheduled = False
 
         self.event_queue: queue.Queue[
             tuple[str, object]
@@ -87,6 +91,10 @@ class CyberDeskControlPanel:
         self._set_connected_state(False)
 
         self.root.after(100, self._process_events)
+        self.root.after(
+            500,
+            self._start_automatic_connection,
+        )
         self.root.protocol(
             "WM_DELETE_WINDOW",
             self._on_close,
@@ -484,7 +492,23 @@ class CyberDeskControlPanel:
         self.log_text.see(tk.END)
         self.log_text.configure(state=tk.DISABLED)
 
+    def _start_automatic_connection(self) -> None:
+        self.manual_disconnect = False
+        self._start_connection()
+
     def _start_connection(self) -> None:
+        if self.device is not None:
+            return
+
+        if (
+            self.connection_thread is not None
+            and self.connection_thread.is_alive()
+        ):
+            return
+
+        self.manual_disconnect = False
+        self.reconnect_scheduled = False
+
         if (
             self.connection_thread is not None
             and self.connection_thread.is_alive()
@@ -634,6 +658,29 @@ class CyberDeskControlPanel:
         self.metrics_thread.start()
 
     def _stop_metrics_stream(self) -> None:
+        was_running = (
+            self.metrics_thread is not None
+            and self.metrics_thread.is_alive()
+            and not self.metrics_stop_event.is_set()
+        )
+
+        self.metrics_stop_event.set()
+        self.stream_status.set("Stream stopped")
+
+        self.stop_stream_button.configure(
+            state=tk.DISABLED
+        )
+
+        if self.device is not None:
+            self.start_stream_button.configure(
+                state=tk.NORMAL
+            )
+
+        if was_running:
+            self._append_log(
+                "Desktop metrics stream stopped."
+            )
+        
         self.metrics_stop_event.set()
 
         self.stream_status.set("Stream stopped")
@@ -734,7 +781,96 @@ class CyberDeskControlPanel:
             f"MEM {metrics.memory_percent:.1f}%"
         )
 
-    def _disconnect(self) -> None:
+    def _check_connection(self) -> None:
+        if self.device is None:
+            self.connection_check_running = False
+
+            if not self.manual_disconnect:
+                self._schedule_reconnect()
+
+            return
+
+        thread = threading.Thread(
+            target=self._connection_check_worker,
+            daemon=True,
+        )
+        thread.start()
+
+        self.root.after(
+            CONNECTION_CHECK_INTERVAL_MS,
+            self._check_connection,
+        )
+
+    def _connection_check_worker(self) -> None:
+        if self.device is None:
+            return
+
+        try:
+            with self.serial_lock:
+                response = send_command(
+                    self.device.serial,
+                    "PING",
+                    wait_seconds=0.4,
+                )
+
+            if "PONG" not in response:
+                raise RuntimeError(
+                    "Device did not respond to PING."
+                )
+
+        except Exception as error:
+            self.event_queue.put(
+                (
+                    "connection_lost",
+                    str(error),
+                )
+            )
+
+    def _schedule_reconnect(self) -> None:
+        if self.manual_disconnect:
+            return
+
+        if self.reconnect_scheduled:
+            return
+
+        if self.device is not None:
+            return
+
+        self.reconnect_scheduled = True
+        self.connection_status.set(
+            "Waiting for device…"
+        )
+
+        self._append_log(
+            "Reconnect scheduled."
+        )
+
+        self.root.after(
+            RECONNECT_INTERVAL_MS,
+            self._attempt_reconnect,
+        )
+
+    def _attempt_reconnect(self) -> None:
+        self.reconnect_scheduled = False
+
+        if self.manual_disconnect:
+            return
+
+        if self.device is not None:
+            return
+
+        self._append_log(
+            "Attempting to reconnect..."
+        )
+
+        self._start_connection()
+
+    def _disconnect(
+        self,
+        manual: bool = True,
+    ) -> None:
+        if manual:
+            self.manual_disconnect = True
         self.metrics_stop_event.set()
 
         if self.device is not None:
@@ -759,6 +895,8 @@ class CyberDeskControlPanel:
         self._append_log(
             "Serial connection closed."
         )
+        if not manual:
+            self._schedule_reconnect()
 
     def _process_events(self) -> None:
         try:
@@ -777,19 +915,29 @@ class CyberDeskControlPanel:
                         continue
 
                     self.device = device
-                    self.connection_status.set(
-                        "Connected"
-                    )
+                    self.manual_disconnect = False
+                    self.connection_status.set("Connected")
                     self.port_status.set(
                         f"Port: {device.port}"
                     )
                     self._set_connected_state(True)
+
                     self._append_log(
                         f"Connected to {device.port}"
                     )
 
-                    self._send_page_command(
-                        "GET_STATUS"
+                    self._send_page_command("GET_STATUS")
+
+                    if not self.connection_check_running:
+                        self.connection_check_running = True
+                        self.root.after(
+                            CONNECTION_CHECK_INTERVAL_MS,
+                            self._check_connection,
+                        )
+
+                    self.root.after(
+                        500,
+                        self._start_metrics_stream,
                     )
 
                 elif event_name == "metrics_update":
@@ -814,12 +962,15 @@ class CyberDeskControlPanel:
                     self.connection_status.set(
                         "Connection failed"
                     )
+
                     self.connect_button.configure(
                         state=tk.NORMAL
                     )
-                    self._append_log(
-                        str(payload)
-                    )
+
+                    self._append_log(str(payload))
+
+                    if not self.manual_disconnect:
+                        self._schedule_reconnect()
 
                 elif event_name == (
                     "command_response"
@@ -837,7 +988,7 @@ class CyberDeskControlPanel:
                     self._append_log(
                         f"Connection lost: {payload}"
                     )
-                    self._disconnect()
+                    self._disconnect(manual=False)
 
         except queue.Empty:
             pass
@@ -848,7 +999,11 @@ class CyberDeskControlPanel:
         )
 
     def _on_close(self) -> None:
-        self._disconnect()
+        self.manual_disconnect = True
+        self.reconnect_scheduled = False
+        self.connection_check_running = False
+
+        self._disconnect(manual=True)
         self.root.destroy()
 
 
