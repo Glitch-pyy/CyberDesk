@@ -113,6 +113,8 @@ bool clockScreenInitialized = false;
 ScreenPage currentPage = ScreenPage::CLOCK;
 bool pageNeedsRedraw = true;
 
+String serialCommandBuffer;
+
 char lastDisplayedDate[16] = "";
 
 void drawCenteredText(
@@ -476,7 +478,7 @@ void drawInfoScreen() {
 
     display->setTextColor(GREEN);
     display->setCursor(110, 130);
-    display->print("Phase 3");
+    display->print("Phase 4");
 
     display->setTextColor(DARKGREY);
     display->setCursor(12, 155);
@@ -683,6 +685,144 @@ bool wasButtonPressed(
     return false;
 }
 
+const char* getCurrentPageName() {
+    switch (currentPage) {
+        case ScreenPage::CLOCK:
+            return "CLOCK";
+
+        case ScreenPage::SYSTEM:
+            return "SYSTEM";
+
+        case ScreenPage::INFO:
+            return "INFO";
+
+        case ScreenPage::COUNT:
+            return "UNKNOWN";
+    }
+
+    return "UNKNOWN";
+}
+
+void handleSerialCommand(String command) {
+    command.trim();
+    command.toUpperCase();
+
+    if (command.isEmpty()) {
+        return;
+    }
+
+    Serial.print("[COMMAND] ");
+    Serial.println(command);
+
+    if (command == "PING") {
+        Serial.println("PONG");
+        return;
+    }
+
+    if (command == "GET_INFO") {
+        Serial.println("DEVICE:CyberDesk");
+        Serial.println("BOARD:LILYGO_T_DISPLAY_S3");
+        Serial.println("CHIP:ESP32-S3");
+        Serial.println("FIRMWARE:PHASE_4");
+        Serial.print("PAGE:");
+        Serial.println(getCurrentPageName());
+        return;
+    }
+
+    if (command == "GET_STATUS") {
+        Serial.print("WIFI:");
+
+        if (WiFi.status() == WL_CONNECTED) {
+            Serial.println("CONNECTED");
+
+            Serial.print("IP:");
+            Serial.println(WiFi.localIP());
+
+            Serial.print("RSSI:");
+            Serial.println(WiFi.RSSI());
+        } else {
+            Serial.println("DISCONNECTED");
+            Serial.println("IP:0.0.0.0");
+            Serial.println("RSSI:0");
+        }
+
+        Serial.print("UPTIME_MS:");
+        Serial.println(millis());
+
+        Serial.print("PAGE:");
+        Serial.println(getCurrentPageName());
+
+        return;
+    }
+
+    if (command == "PAGE_NEXT") {
+        goToNextPage();
+
+        Serial.print("OK:PAGE:");
+        Serial.println(getCurrentPageName());
+        return;
+    }
+
+    if (command == "PAGE_PREVIOUS") {
+        goToPreviousPage();
+
+        Serial.print("OK:PAGE:");
+        Serial.println(getCurrentPageName());
+        return;
+    }
+
+    if (command == "PAGE_CLOCK") {
+        currentPage = ScreenPage::CLOCK;
+        pageNeedsRedraw = true;
+
+        Serial.println("OK:PAGE:CLOCK");
+        return;
+    }
+
+    if (command == "PAGE_SYSTEM") {
+        currentPage = ScreenPage::SYSTEM;
+        pageNeedsRedraw = true;
+
+        Serial.println("OK:PAGE:SYSTEM");
+        return;
+    }
+
+    if (command == "PAGE_INFO") {
+        currentPage = ScreenPage::INFO;
+        pageNeedsRedraw = true;
+
+        Serial.println("OK:PAGE:INFO");
+        return;
+    }
+
+    Serial.print("ERROR:UNKNOWN_COMMAND:");
+    Serial.println(command);
+}
+
+void handleSerialInput() {
+    while (Serial.available() > 0) {
+        const char receivedCharacter =
+            static_cast<char>(Serial.read());
+
+        if (receivedCharacter == '\n') {
+            handleSerialCommand(serialCommandBuffer);
+            serialCommandBuffer = "";
+            continue;
+        }
+
+        if (receivedCharacter == '\r') {
+            continue;
+        }
+
+        if (serialCommandBuffer.length() < 128) {
+            serialCommandBuffer += receivedCharacter;
+        } else {
+            serialCommandBuffer = "";
+            Serial.println("ERROR:COMMAND_TOO_LONG");
+        }
+    }
+}
+
 void setup() {
     Serial.begin(115200);
     delay(1000);
@@ -706,6 +846,8 @@ void setup() {
 
 void loop() {
     const uint32_t currentTime = millis();
+
+    handleSerialInput();
 
     // Button 1: previous page
     if (
@@ -732,7 +874,7 @@ void loop() {
         Serial.println("Button 2: next page");
         goToNextPage();
     }
-    
+
     // Redraw after page navigation
     if (pageNeedsRedraw) {
         drawCurrentPage();
