@@ -91,3 +91,8 @@ firmware/.pio/
 
 # Local Wi-Fi credentials
 firmware/include/secrets.h
+
+# Python
+desktop/.venv/
+__pycache__/
+*.pyc
