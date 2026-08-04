@@ -182,6 +182,7 @@ def run_interactive_client(device: DeviceConnection) -> None:
     print("  previous  - Go to previous page")
     print("  clock     - Open clock page")
     print("  system    - Open system page")
+    print("  desktop   - Open desktop metrics page")
     print("  device    - Open device information page")
     print("  ping      - Test connection")
     print("  quit      - Close client")
@@ -193,6 +194,7 @@ def run_interactive_client(device: DeviceConnection) -> None:
         "previous": "PAGE_PREVIOUS",
         "clock": "PAGE_CLOCK",
         "system": "PAGE_SYSTEM",
+        "desktop": "PAGE_DESKTOP",
         "device": "PAGE_INFO",
         "ping": "PING",
     }

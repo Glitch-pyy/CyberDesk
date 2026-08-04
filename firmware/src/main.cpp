@@ -42,6 +42,8 @@ constexpr uint32_t SCREEN_UPDATE_INTERVAL_MS = 1000;
 namespace UiConfig {
 constexpr uint32_t WIFI_STATUS_UPDATE_INTERVAL_MS = 5000;
 constexpr uint32_t SYSTEM_UPDATE_INTERVAL_MS = 1000;
+constexpr uint32_t DESKTOP_UPDATE_INTERVAL_MS = 1000;
+constexpr uint32_t DESKTOP_DATA_TIMEOUT_MS = 5000;
 
 constexpr int16_t TIME_X = 50;
 constexpr int16_t TIME_Y = 48;
@@ -62,6 +64,7 @@ constexpr int16_t WIFI_HEIGHT = 12;
 enum class ScreenPage : uint8_t {
     CLOCK = 0,
     SYSTEM,
+    DESKTOP,
     INFO,
     COUNT
 };
@@ -99,7 +102,7 @@ uint32_t lastTimeSyncAttempt = 0;
 uint32_t lastScreenUpdate = 0;
 uint32_t lastWiFiStatusUpdate = 0;
 uint32_t lastSystemUpdate = 0;
-
+uint32_t lastDesktopScreenUpdate = 0;
 bool button1LastReading = HIGH;
 bool button1StableState = HIGH;
 uint32_t button1LastChangeTime = 0;
@@ -114,6 +117,15 @@ ScreenPage currentPage = ScreenPage::CLOCK;
 bool pageNeedsRedraw = true;
 
 String serialCommandBuffer;
+
+uint8_t desktopCpuPercent = 0;
+uint8_t desktopMemoryPercent = 0;
+int16_t desktopBatteryPercent = -1;
+bool desktopPowerPlugged = false;
+String desktopHostname = "Unavailable";
+
+bool desktopDataReceived = false;
+uint32_t lastDesktopUpdate = 0;
 
 char lastDisplayedDate[16] = "";
 
@@ -320,6 +332,59 @@ void updateClockScreen() {
     updateDateArea(timeInfo);
 }
 
+uint16_t getUsageColor(uint8_t percentage) {
+    if (percentage >= 85) {
+        return RED;
+    }
+
+    if (percentage >= 65) {
+        return YELLOW;
+    }
+
+    return GREEN;
+}
+
+void drawPercentageBar(
+    int16_t x,
+    int16_t y,
+    int16_t width,
+    int16_t height,
+    uint8_t percentage,
+    uint16_t color
+) {
+    display->drawRect(
+        x,
+        y,
+        width,
+        height,
+        DARKGREY
+    );
+
+    const int16_t innerWidth = width - 2;
+    const int16_t filledWidth =
+        static_cast<int16_t>(
+            innerWidth * percentage / 100
+        );
+
+    display->fillRect(
+        x + 1,
+        y + 1,
+        innerWidth,
+        height - 2,
+        BLACK
+    );
+
+    if (filledWidth > 0) {
+        display->fillRect(
+            x + 1,
+            y + 1,
+            filledWidth,
+            height - 2,
+            color
+        );
+    }
+}
+
 void drawSystemLayout() {
     display->fillScreen(BLACK);
 
@@ -431,6 +496,130 @@ void updateSystemData() {
     display->print(uptimeText);
 }
 
+void drawDesktopLayout() {
+    display->fillScreen(BLACK);
+
+    display->setTextColor(CYAN);
+    display->setTextSize(2);
+    display->setCursor(12, 12);
+    display->print("DESKTOP");
+
+    display->drawFastHLine(
+        10,
+        36,
+        DisplayConfig::WIDTH - 20,
+        DARKGREY
+    );
+
+    display->setTextSize(1);
+    display->setTextColor(DARKGREY);
+
+    display->setCursor(18, 52);
+    display->print("CPU");
+
+    display->setCursor(18, 80);
+    display->print("MEMORY");
+
+    display->setCursor(18, 108);
+    display->print("BATTERY");
+
+    display->setCursor(18, 136);
+    display->print("HOST");
+
+    display->setCursor(12, 155);
+    display->print("< Previous       Next >");
+}
+
+void updateDesktopData() {
+    display->fillRect(
+        88,
+        43,
+        225,
+        105,
+        BLACK
+    );
+
+    display->setTextSize(1);
+
+    const bool dataIsFresh =
+        desktopDataReceived &&
+        millis() - lastDesktopUpdate <=
+            UiConfig::DESKTOP_DATA_TIMEOUT_MS;
+
+    if (!dataIsFresh) {
+        display->setTextColor(RED);
+        display->setCursor(105, 72);
+        display->print("Desktop offline");
+
+        display->setTextColor(DARKGREY);
+        display->setCursor(105, 98);
+        display->print("Run desktop_stream.py");
+        return;
+    }
+
+    // CPU
+    const uint16_t cpuColor =
+        getUsageColor(desktopCpuPercent);
+
+    display->setTextColor(cpuColor);
+    display->setCursor(92, 52);
+    display->printf("%u%%", desktopCpuPercent);
+
+    drawPercentageBar(
+        132,
+        50,
+        170,
+        10,
+        desktopCpuPercent,
+        cpuColor
+    );
+
+    // Memory
+    const uint16_t memoryColor =
+        getUsageColor(desktopMemoryPercent);
+
+    display->setTextColor(memoryColor);
+    display->setCursor(92, 80);
+    display->printf("%u%%", desktopMemoryPercent);
+
+    drawPercentageBar(
+        132,
+        78,
+        170,
+        10,
+        desktopMemoryPercent,
+        memoryColor
+    );
+
+    // Battery
+    display->setCursor(92, 108);
+
+    if (desktopBatteryPercent < 0) {
+        display->setTextColor(DARKGREY);
+        display->print("N/A");
+    } else {
+        uint16_t batteryColor = GREEN;
+
+        if (desktopBatteryPercent <= 20) {
+            batteryColor = RED;
+        } else if (desktopBatteryPercent <= 40) {
+            batteryColor = YELLOW;
+        }
+
+        display->setTextColor(batteryColor);
+        display->printf(
+            "%d%% %s",
+            desktopBatteryPercent,
+            desktopPowerPlugged ? "AC" : "BAT"
+        );
+    }
+
+    // Hostname
+    display->setTextColor(WHITE);
+    display->setCursor(92, 136);
+    display->print(desktopHostname);
+}
+
 void drawInfoScreen() {
     display->fillScreen(BLACK);
 
@@ -504,6 +693,15 @@ void drawCurrentPage() {
             lastSystemUpdate = millis();
 
             Serial.println("Page: SYSTEM");
+            break;
+
+        case ScreenPage::DESKTOP:
+            drawDesktopLayout();
+            updateDesktopData();
+
+            lastDesktopScreenUpdate = millis();
+
+            Serial.println("Page: DESKTOP");
             break;
 
         case ScreenPage::INFO:
@@ -693,6 +891,9 @@ const char* getCurrentPageName() {
         case ScreenPage::SYSTEM:
             return "SYSTEM";
 
+        case ScreenPage::DESKTOP:
+            return "DESKTOP";
+    
         case ScreenPage::INFO:
             return "INFO";
 
@@ -703,23 +904,149 @@ const char* getCurrentPageName() {
     return "UNKNOWN";
 }
 
+String getProtocolField(
+    const String& command,
+    const String& fieldName
+) {
+    const String prefix = fieldName + "=";
+    const int startIndex = command.indexOf(prefix);
+
+    if (startIndex < 0) {
+        return "";
+    }
+
+    const int valueStart =
+        startIndex + prefix.length();
+
+    int valueEnd = command.indexOf('|', valueStart);
+
+    if (valueEnd < 0) {
+        valueEnd = command.length();
+    }
+
+    return command.substring(valueStart, valueEnd);
+}
+
+
+bool parseDesktopUpdate(const String& command) {
+    const String cpuValue =
+        getProtocolField(command, "CPU");
+
+    const String memoryValue =
+        getProtocolField(command, "MEM");
+
+    const String batteryValue =
+        getProtocolField(command, "BAT");
+
+    const String powerValue =
+        getProtocolField(command, "POWER");
+
+    const String hostnameValue =
+        getProtocolField(command, "HOST");
+
+    if (
+        cpuValue.isEmpty() ||
+        memoryValue.isEmpty() ||
+        batteryValue.isEmpty() ||
+        powerValue.isEmpty() ||
+        hostnameValue.isEmpty()
+    ) {
+        return false;
+    }
+
+    const int cpu = cpuValue.toInt();
+    const int memory = memoryValue.toInt();
+    const int battery = batteryValue.toInt();
+    const int power = powerValue.toInt();
+
+    if (
+        cpu < 0 ||
+        cpu > 100 ||
+        memory < 0 ||
+        memory > 100 ||
+        battery < -1 ||
+        battery > 100 ||
+        (power != 0 && power != 1)
+    ) {
+        return false;
+    }
+
+    desktopCpuPercent =
+        static_cast<uint8_t>(cpu);
+
+    desktopMemoryPercent =
+        static_cast<uint8_t>(memory);
+
+    desktopBatteryPercent =
+        static_cast<int16_t>(battery);
+
+    desktopPowerPlugged =
+        power == 1;
+
+    desktopHostname = hostnameValue;
+
+    if (desktopHostname.length() > 24) {
+        desktopHostname =
+            desktopHostname.substring(0, 24);
+    }
+
+    desktopDataReceived = true;
+    lastDesktopUpdate = millis();
+
+    if (currentPage == ScreenPage::DESKTOP) {
+        updateDesktopData();
+        lastDesktopScreenUpdate = millis();
+    }
+
+    return true;
+}
+
 void handleSerialCommand(String command) {
     command.trim();
-    command.toUpperCase();
 
     if (command.isEmpty()) {
         return;
     }
 
+    String normalizedCommand = command;
+    normalizedCommand.toUpperCase();
+
     Serial.print("[COMMAND] ");
     Serial.println(command);
 
-    if (command == "PING") {
+    if (normalizedCommand.startsWith("DESKTOP_UPDATE|")) {
+        if (parseDesktopUpdate(command)) {
+            Serial.println("OK:DESKTOP_UPDATE");
+
+            Serial.print("DESKTOP_CPU:");
+            Serial.println(desktopCpuPercent);
+
+            Serial.print("DESKTOP_MEM:");
+            Serial.println(desktopMemoryPercent);
+
+            Serial.print("DESKTOP_BAT:");
+            Serial.println(desktopBatteryPercent);
+
+            Serial.print("DESKTOP_POWER:");
+            Serial.println(
+                desktopPowerPlugged ? "PLUGGED" : "BATTERY"
+            );
+
+            Serial.print("DESKTOP_HOST:");
+            Serial.println(desktopHostname);
+        } else {
+            Serial.println("ERROR:INVALID_DESKTOP_UPDATE");
+        }
+
+        return;
+    }
+
+    if (normalizedCommand == "PING") {
         Serial.println("PONG");
         return;
     }
 
-    if (command == "GET_INFO") {
+    if (normalizedCommand == "GET_INFO") {
         Serial.println("DEVICE:CyberDesk");
         Serial.println("BOARD:LILYGO_T_DISPLAY_S3");
         Serial.println("CHIP:ESP32-S3");
@@ -729,7 +1056,7 @@ void handleSerialCommand(String command) {
         return;
     }
 
-    if (command == "GET_STATUS") {
+    if (normalizedCommand == "GET_STATUS") {
         Serial.print("WIFI:");
 
         if (WiFi.status() == WL_CONNECTED) {
@@ -755,7 +1082,7 @@ void handleSerialCommand(String command) {
         return;
     }
 
-    if (command == "PAGE_NEXT") {
+    if (normalizedCommand == "PAGE_NEXT") {
         goToNextPage();
 
         Serial.print("OK:PAGE:");
@@ -763,7 +1090,7 @@ void handleSerialCommand(String command) {
         return;
     }
 
-    if (command == "PAGE_PREVIOUS") {
+    if (normalizedCommand == "PAGE_PREVIOUS") {
         goToPreviousPage();
 
         Serial.print("OK:PAGE:");
@@ -771,7 +1098,7 @@ void handleSerialCommand(String command) {
         return;
     }
 
-    if (command == "PAGE_CLOCK") {
+    if (normalizedCommand == "PAGE_CLOCK") {
         currentPage = ScreenPage::CLOCK;
         pageNeedsRedraw = true;
 
@@ -779,7 +1106,7 @@ void handleSerialCommand(String command) {
         return;
     }
 
-    if (command == "PAGE_SYSTEM") {
+    if (normalizedCommand == "PAGE_SYSTEM") {
         currentPage = ScreenPage::SYSTEM;
         pageNeedsRedraw = true;
 
@@ -787,7 +1114,15 @@ void handleSerialCommand(String command) {
         return;
     }
 
-    if (command == "PAGE_INFO") {
+    if (normalizedCommand == "PAGE_DESKTOP") {
+        currentPage = ScreenPage::DESKTOP;
+        pageNeedsRedraw = true;
+
+        Serial.println("OK:PAGE:DESKTOP");
+        return;
+    }
+
+    if (normalizedCommand == "PAGE_INFO") {
         currentPage = ScreenPage::INFO;
         pageNeedsRedraw = true;
 
@@ -814,7 +1149,7 @@ void handleSerialInput() {
             continue;
         }
 
-        if (serialCommandBuffer.length() < 128) {
+        if (serialCommandBuffer.length() < 256) {
             serialCommandBuffer += receivedCharacter;
         } else {
             serialCommandBuffer = "";
@@ -928,32 +1263,31 @@ void loop() {
     }
 
     if (
-    currentPage == ScreenPage::CLOCK &&
-    timeSynchronized &&
-    currentTime - lastScreenUpdate >=
-        TimeConfig::SCREEN_UPDATE_INTERVAL_MS
-) {
-    lastScreenUpdate = currentTime;
-    updateClockScreen();
-}
+        currentPage == ScreenPage::SYSTEM &&
+        currentTime - lastSystemUpdate >=
+            UiConfig::SYSTEM_UPDATE_INTERVAL_MS
+    ) {
+        lastSystemUpdate = currentTime;
+        updateSystemData();
+    }
 
-if (
-    currentPage == ScreenPage::SYSTEM &&
-    currentTime - lastSystemUpdate >=
-        UiConfig::SYSTEM_UPDATE_INTERVAL_MS
-) {
-    lastSystemUpdate = currentTime;
-    updateSystemData();
-}
+    if (
+        currentPage == ScreenPage::DESKTOP &&
+        currentTime - lastDesktopScreenUpdate >=
+            UiConfig::DESKTOP_UPDATE_INTERVAL_MS
+    ) {
+        lastDesktopScreenUpdate = currentTime;
+        updateDesktopData();
+    }
 
-if (
-    currentPage == ScreenPage::CLOCK &&
-    currentTime - lastWiFiStatusUpdate >=
-        UiConfig::WIFI_STATUS_UPDATE_INTERVAL_MS
-) {
-    lastWiFiStatusUpdate = currentTime;
-    updateWiFiStatusArea();
-}
+    if (
+        currentPage == ScreenPage::CLOCK &&
+        currentTime - lastWiFiStatusUpdate >=
+            UiConfig::WIFI_STATUS_UPDATE_INTERVAL_MS
+    ) {
+        lastWiFiStatusUpdate = currentTime;
+        updateWiFiStatusArea();
+    }
 
     delay(20);
 }
