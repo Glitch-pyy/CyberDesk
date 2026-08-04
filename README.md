@@ -4,6 +4,20 @@ CyberDesk is an open-source modular desktop hardware system based on the ESP32-S
 
 The project is currently built around the LILYGO T-Display-S3 development board.
 
+## Preview
+
+### Desktop Metrics Dashboard
+
+![CyberDesk desktop metrics dashboard](images/desktop-dashboard.jpg)
+
+### Desktop Control Panel
+
+![CyberDesk desktop control panel](images/control-panel.png)
+
+### USB Serial Protocol
+
+![CyberDesk serial protocol](images/serial-protocol.png)
+
 ## Goals
 
 - Desktop status dashboard
@@ -41,6 +55,18 @@ Current development hardware:
 - Device information page
 - Circular previous/next page navigation
 - Local credential configuration excluded from Git
+- USB CDC serial communication protocol
+- Python-based desktop client
+- Automatic CyberDesk serial-port discovery
+- Desktop CPU, memory and battery monitoring
+- Real-time desktop metrics streaming over USB
+- Dedicated desktop metrics dashboard page
+- Tkinter desktop control panel
+- GUI-based display page navigation
+- Start and stop controls for metrics streaming
+- Automatic device connection and recovery
+- USB disconnection detection and reconnection
+- Desktop data timeout and offline-state detection
 
 ## Controls
 
@@ -53,7 +79,44 @@ Available pages:
 
 1. Clock
 2. System Status
-3. Device Information
+3. Desktop Metrics
+4. Device Information
+
+### Serial Commands
+
+| Command | Description |
+| --- | --- |
+| `PING` | Test the USB serial connection |
+| `GET_INFO` | Read device and firmware information |
+| `GET_STATUS` | Read Wi-Fi, uptime and current page |
+| `PAGE_CLOCK` | Open the clock page |
+| `PAGE_SYSTEM` | Open the system page |
+| `PAGE_DESKTOP` | Open the desktop metrics page |
+| `PAGE_INFO` | Open the device information page |
+| `PAGE_NEXT` | Open the next page |
+| `PAGE_PREVIOUS` | Open the previous page |
+| `DESKTOP_UPDATE\|...` | Send desktop metrics to the device |
+
+## Desktop Application
+
+CyberDesk includes a Python desktop application that communicates with the ESP32-S3 over USB serial.
+
+The desktop application can:
+
+- Automatically discover the connected CyberDesk device
+- Display CPU, memory and battery information
+- Stream live desktop metrics to the device
+- Switch between display pages
+- Detect USB disconnection
+- Automatically reconnect when the device becomes available again
+
+### Setup
+
+Create and activate a Python virtual environment:
+
+```bash
+python3 -m venv desktop/.venv
+source desktop/.venv/bin/activate
 
 ## Firmware Setup
 
@@ -81,4 +144,5 @@ CyberDesk/
 - Phase 1: Hardware bring-up — Complete
 - Phase 2: Network clock dashboard — Complete
 - Phase 3: Multi-page UI and button navigation — Complete
-- Phase 4: Desktop communication — Planned
+- Phase 4: Desktop communication and control panel — Complete
+- Phase 5: Modular desktop widgets and plugin architecture — Planned
