@@ -14,10 +14,12 @@ from cyberdesk_client import (
     send_command,
 )
 
-from desktop_stream import build_desktop_update_command
-from system_metrics import (
+from desktop_stream import (
+    create_default_plugin_registry,
+    get_system_metrics_plugin,
+)
+from plugins.system_metrics import (
     SystemMetrics,
-    collect_system_metrics,
 )
 
 
@@ -52,6 +54,10 @@ class CyberDeskControlPanel:
         self.manual_disconnect = False
         self.connection_check_running = False
         self.reconnect_scheduled = False
+        self.plugin_registry = create_default_plugin_registry()
+        self.system_metrics_plugin = get_system_metrics_plugin(
+            self.plugin_registry
+        )
 
         self.event_queue: queue.Queue[
             tuple[str, object]
@@ -628,7 +634,10 @@ class CyberDeskControlPanel:
                 )
 
     def _start_metrics_stream(self) -> None:
-        if self.device is None:
+        if (
+            self.device is None
+            or not self.system_metrics_plugin.enabled
+        ):
             return
 
         if (
@@ -704,9 +713,8 @@ class CyberDeskControlPanel:
                 break
 
             try:
-                metrics = collect_system_metrics()
-
-                command = build_desktop_update_command(
+                metrics = self.system_metrics_plugin.collect()
+                command = self.system_metrics_plugin.format_serial_command(
                     metrics
                 )
 
