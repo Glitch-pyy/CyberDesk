@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import re
 import sys
 import time
 
@@ -9,63 +8,49 @@ from cyberdesk_client import (
     connect_to_cyberdesk,
     send_command,
 )
-from system_metrics import (
+from plugins.registry import PluginRegistry
+from plugins.system_metrics import (
     SystemMetrics,
-    collect_system_metrics,
+    SystemMetricsPlugin,
+    sanitize_text,
 )
 
 
 UPDATE_INTERVAL_SECONDS = 2.0
-MAX_HOSTNAME_LENGTH = 24
+SYSTEM_METRICS_PLUGIN_ID = "system_metrics"
+
+
+def create_default_plugin_registry() -> PluginRegistry:
+    """Create the explicitly configured registry used by desktop streaming."""
+    registry = PluginRegistry()
+    registry.register(SystemMetricsPlugin())
+    return registry
+
+
+def get_system_metrics_plugin(
+    registry: PluginRegistry,
+) -> SystemMetricsPlugin:
+    """Return the configured system metrics plugin with a checked type."""
+    plugin = registry.get(SYSTEM_METRICS_PLUGIN_ID)
+
+    if not isinstance(plugin, SystemMetricsPlugin):
+        raise TypeError(
+            "The system_metrics registry entry has an unexpected type."
+        )
+
+    return plugin
 
 
 def sanitize_hostname(hostname: str) -> str:
-    """Make the hostname safe for the serial protocol."""
-
-    sanitized = re.sub(
-        r"[^A-Za-z0-9._-]",
-        "-",
-        hostname,
-    )
-
-    sanitized = sanitized.strip("-")
-
-    if not sanitized:
-        return "Unknown"
-
-    return sanitized[:MAX_HOSTNAME_LENGTH]
+    """Retain the Phase 4 hostname helper as a compatibility wrapper."""
+    return sanitize_text(hostname)
 
 
 def build_desktop_update_command(
     metrics: SystemMetrics,
 ) -> str:
-    """Encode one metrics snapshot as a serial command."""
-
-    cpu_percent = round(metrics.cpu_percent)
-    memory_percent = round(metrics.memory_percent)
-
-    battery_percent = (
-        metrics.battery_percent
-        if metrics.battery_percent is not None
-        else -1
-    )
-
-    power_plugged = (
-        1
-        if metrics.power_plugged is True
-        else 0
-    )
-
-    hostname = sanitize_hostname(metrics.hostname)
-
-    return (
-        "DESKTOP_UPDATE"
-        f"|CPU={cpu_percent}"
-        f"|MEM={memory_percent}"
-        f"|BAT={battery_percent}"
-        f"|POWER={power_plugged}"
-        f"|HOST={hostname}"
-    )
+    """Retain the Phase 4 command helper as a compatibility wrapper."""
+    return SystemMetricsPlugin().format_serial_command(metrics)
 
 
 def print_update(
@@ -98,8 +83,14 @@ def print_update(
 
 def stream_desktop_metrics(
     device: DeviceConnection,
+    registry: PluginRegistry | None = None,
 ) -> None:
     connection = device.serial
+    plugin_registry = registry or create_default_plugin_registry()
+    system_metrics_plugin = get_system_metrics_plugin(plugin_registry)
+
+    if not system_metrics_plugin.enabled:
+        return
 
     print()
     print("CyberDesk Desktop Metrics Stream")
@@ -107,11 +98,8 @@ def stream_desktop_metrics(
     print("Press Control+C to stop.")
 
     while True:
-        metrics = collect_system_metrics()
-
-        command = build_desktop_update_command(
-            metrics
-        )
+        metrics = system_metrics_plugin.collect()
+        command = system_metrics_plugin.format_serial_command(metrics)
 
         response = send_command(
             connection,

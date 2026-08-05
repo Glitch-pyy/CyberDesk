@@ -1,51 +1,20 @@
 from __future__ import annotations
 
-import platform
-import socket
 import time
-from dataclasses import dataclass
 
-import psutil
-
-
-@dataclass(frozen=True)
-class SystemMetrics:
-    """Snapshot of desktop system information."""
-
-    cpu_percent: float
-    memory_percent: float
-    battery_percent: int | None
-    power_plugged: bool | None
-    hostname: str
-    operating_system: str
+from plugins.system_metrics import (
+    SystemMetrics,
+    SystemMetricsPlugin,
+    get_battery_status,
+)
 
 
-def get_battery_status() -> tuple[int | None, bool | None]:
-    """Return battery percentage and charging state."""
-
-    battery = psutil.sensors_battery()
-
-    if battery is None:
-        return None, None
-
-    return round(battery.percent), battery.power_plugged
+_SYSTEM_METRICS_PLUGIN = SystemMetricsPlugin()
 
 
 def collect_system_metrics() -> SystemMetrics:
-    """Collect one system metrics snapshot."""
-
-    cpu_percent = psutil.cpu_percent(interval=0.5)
-    memory = psutil.virtual_memory()
-    battery_percent, power_plugged = get_battery_status()
-
-    return SystemMetrics(
-        cpu_percent=round(cpu_percent, 1),
-        memory_percent=round(memory.percent, 1),
-        battery_percent=battery_percent,
-        power_plugged=power_plugged,
-        hostname=socket.gethostname(),
-        operating_system=platform.system(),
-    )
+    """Collect metrics through the system metrics plugin."""
+    return _SYSTEM_METRICS_PLUGIN.collect()
 
 
 def format_battery(metrics: SystemMetrics) -> str:
